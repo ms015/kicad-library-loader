@@ -18,7 +18,7 @@ import zipfile
 
 APP = Path(__file__).resolve().parent
 SERVICES = ('CSE', 'UltraLibrarian', 'SnapMagic', 'LCSC')
-WATCH_FORMAT_VERSION = 2
+WATCH_FORMAT_VERSION = 3
 
 
 def default_config():
@@ -171,6 +171,18 @@ def unpack(path, destination):
             service = 'UltraLibrarian'
         elif is_snapeda(z, infos):
             service = 'SnapMagic'
+            symbol_infos = [i for i in infos if i.filename.lower().endswith('.kicad_sym')]
+            if any(PurePosixPath(n).name.lower() == 'snapeda-library.kicad_sym' for n in names):
+                raise UnsupportedArchive('SnapEDAの一括ZIPは対象外です。個別ZIPを使用してください')
+            if symbol_infos:
+                count = sum(len(children(parse(z.read(i).decode('utf-8-sig')), 'symbol')) for i in symbol_infos)
+                if count != 1:
+                    raise UnsupportedArchive('SnapEDAは1部品の個別ZIPのみ対応しています')
+            else:
+                legacy = [i for i in infos if i.filename.lower().endswith('.lib')]
+                count = sum(len(re.findall(rb'^DEF\s', z.read(i), re.M)) for i in legacy)
+                if count != 1:
+                    raise UnsupportedArchive('SnapEDAは1部品の個別ZIPのみ対応しています')
         else:
             raise UnsupportedArchive('CSE / UltraLibrarian / SnapEDA のKiCad ZIPではありません')
         seen = set()
@@ -470,6 +482,7 @@ class Engine:
         return updates
 
     def publish(self, out, service, result, manifest):
+        self.rename_conflicts(out, service, result)
         updates = []
         # Models then footprints then symbols, registration last. Never overwrite conflicting parts.
         for ext in ('.3dshapes', '.pretty', '.kicad_symdir'):
@@ -491,6 +504,67 @@ class Engine:
         self.log(f"{service}: {', '.join(result['symbols'])} を登録しました")
         for warning in result['warnings']:
             self.log('注意: ' + warning)
+
+    def rename_conflicts(self, out, service, result):
+        """Version a complete incoming set so all internal references stay together."""
+        extensions = ('.3dshapes', '.pretty', '.kicad_symdir')
+        files = [(ext, p) for ext in extensions for p in sorted((out / (service + ext)).iterdir())]
+
+        def content(ext, path):
+            if ext == '.3dshapes':
+                return path.read_bytes()
+            return dump(semantic(parse(path.read_text(encoding='utf-8-sig')))).encode('utf-8')
+
+        conflicts = [p.name for ext, p in files
+                     if (target := self.root / service / (service + ext) / p.name).exists()
+                     and content(ext, p) != content(ext, target)]
+        if not conflicts:
+            return
+        fingerprint = hashlib.sha256()
+        for ext, p in files:
+            fingerprint.update((ext + '/' + p.name + '\0').encode())
+            fingerprint.update(hashlib.sha256(content(ext, p)).digest())
+        suffix = '__' + fingerprint.hexdigest()[:12]
+        maps = {ext: {p.stem: p.stem + suffix for e, p in files if e == ext} for ext in extensions}
+        model_names = {p.name: maps[ext][p.stem] + p.suffix for ext, p in files if ext == '.3dshapes'}
+        for ext, p in files:
+            old, new = p.stem, maps[ext][p.stem]
+            if ext != '.3dshapes':
+                tree = parse(p.read_text(encoding='utf-8-sig'))
+                if ext == '.pretty':
+                    tree[1] = quote(new)
+                    for model in children(tree, 'model'):
+                        path = val(model[1])
+                        base = path.rsplit('/', 1)[-1]
+                        if base in model_names:
+                            model[1] = quote(path.rsplit('/', 1)[0] + '/' + model_names[base])
+                else:
+                    for sym in children(tree, 'symbol'):
+                        old_sym = val(sym[1])
+                        new_sym = maps[ext].get(old_sym, new)
+                        sym[1] = quote(new_sym)
+                        for unit in descendants(sym, 'symbol'):
+                            name = val(unit[1])
+                            if name.startswith(old_sym + '_'):
+                                unit[1] = quote(new_sym + name[len(old_sym):])
+                        for parent in children(sym, 'extends'):
+                            parent[1] = quote(maps[ext].get(val(parent[1]), val(parent[1])))
+                        for prop in children(sym, 'property'):
+                            if val(prop[1]) == 'Footprint':
+                                name = val(prop[2]).split(':')[-1]
+                                if name in maps['.pretty']:
+                                    prop[2] = quote(service + ':' + maps['.pretty'][name])
+                p.write_text(dump(tree), encoding='utf-8')
+            p.rename(p.with_name(new + p.suffix))
+        run([self.cli, 'fp', 'upgrade', '--force', out / (service + '.pretty')])
+        run([self.cli, 'sym', 'upgrade', '--force', out / (service + '.kicad_symdir')])
+        run([self.cli, 'sym', 'export', 'svg', out / (service + '.kicad_symdir'), '-o', out / 'preview'])
+        shutil.rmtree(out / 'preview', ignore_errors=True)
+        result['renamed_due_to_conflicts'] = conflicts
+        result['symbols'] = [maps['.kicad_symdir'].get(n, n) for n in result['symbols']]
+        result['footprints'] = [maps['.pretty'].get(n, n) for n in result['footprints']]
+        result['models'] = [model_names.get(n, n) for n in result['models']]
+        result['warnings'].append('同名データとの差分を検出したため、関連ファイルを別名で登録: ' + suffix)
 
 
 class Watcher:

@@ -159,7 +159,7 @@ class SampleIntegrationTests(unittest.TestCase):
         result = self.e.import_zip(other)
         self.assertEqual(result['symbols'], ['AP2151WG-7_TEST'])
         self.assertEqual(len(list((self.e.root / 'CSE' / 'CSE.kicad_symdir').glob('*'))), 2)
-        # A conflicting pad shape must reject the entire import without partial changes.
+        # A conflicting pad shape creates a separate, internally linked part set.
         conflict = self.base / 'conflict.zip'
         with zipfile.ZipFile(self.cse) as src, zipfile.ZipFile(conflict, 'w') as dst:
             for n in src.namelist():
@@ -168,8 +168,23 @@ class SampleIntegrationTests(unittest.TestCase):
                     data = data.replace(b'(size 0.6 1.15)', b'(size 0.7 1.15)')
                 dst.writestr(n, data)
         before = {str(p): p.read_bytes() for p in self.e.root.rglob('*') if p.is_file()}
-        with self.assertRaises(ValueError): self.e.import_zip(conflict)
-        self.assertEqual(before, {str(p): p.read_bytes() for p in self.e.root.rglob('*') if p.is_file()})
+        result = self.e.import_zip(conflict)
+        self.assertTrue(result['symbols'][0].startswith('AP2151WG-7__'))
+        for path, data in before.items(): self.assertEqual(Path(path).read_bytes(), data)
+        symfile = self.e.root / 'CSE' / 'CSE.kicad_symdir' / (result['symbols'][0] + '.kicad_sym')
+        sym = loader.parse(symfile.read_text(encoding='utf-8'))
+        fp = next(loader.val(p[2]) for p in loader.descendants(sym, 'property') if loader.val(p[1]) == 'Footprint')
+        self.assertEqual(fp, 'CSE:' + result['footprints'][0])
+        foot = loader.parse((self.e.root / 'CSE' / 'CSE.pretty' / (result['footprints'][0] + '.kicad_mod')).read_text(encoding='utf-8'))
+        self.assertTrue(loader.val(loader.children(foot, 'model')[0][1]).endswith('/' + result['models'][0]))
+        # Different ZIP packaging of identical variant data reuses the same names.
+        repacked = self.base / 'repacked.zip'
+        with zipfile.ZipFile(conflict) as src, zipfile.ZipFile(repacked, 'w') as dst:
+            for name in src.namelist(): dst.writestr(name, src.read(name))
+            dst.writestr('extra-note.txt', 'same CAD data')
+        repeated = self.e.import_zip(repacked)
+        self.assertEqual(repeated['symbols'], result['symbols'])
+        self.assertEqual(len(list(symfile.parent.glob('AP2151WG-7__*.kicad_sym'))), 1)
 
 
 class SnapEDAIntegrationTests(unittest.TestCase):
@@ -216,22 +231,37 @@ class SnapEDAIntegrationTests(unittest.TestCase):
             self.assertEqual(len(models), 0 if p.stem == 'Extra' else 1)
         self.assertEqual(len(result['warnings']), 2)
 
-    def test_collection_zip_metadata_and_model_mapping(self):
+    def test_collection_zip_rejected_even_when_renamed(self):
         sample = Path.home() / 'Downloads' / 'SnapEDA-Library.zip'
         if not sample.exists(): self.skipTest('Local collection sample required')
-        result = self.e.import_zip(sample)
-        self.assertEqual(set(result['symbols']), {'TC74HC595AF_EL_F_', 'AP21510FM-7'})
-        root = self.e.root / 'SnapMagic'
-        self.assertEqual(set(result['models']), {'TC74HC595AF(EL,F).step', 'AP21510FM-7.step'})
-        sym = loader.parse((root / 'SnapMagic.kicad_symdir' / 'TC74HC595AF_EL_F_.kicad_sym').read_text(encoding='utf-8'))
-        props = {loader.val(p[1]): loader.val(p[2]) for p in loader.descendants(sym, 'property')}
-        self.assertEqual(props['MPN'], 'TC74HC595AF(EL,F)')
-        self.assertEqual(props['Manufacturer'], 'Toshiba')
-        self.assertEqual(len(list(loader.descendants(sym, 'pin'))), 16)
-        for name, model in [('SOIC127P780X190-16N', 'TC74HC595AF(EL,F).step'),
-                            ('SON50P181X201X60-7N', 'AP21510FM-7.step')]:
-            fp = loader.parse((root / 'SnapMagic.pretty' / (name + '.kicad_mod')).read_text(encoding='utf-8'))
-            self.assertTrue(loader.val(loader.children(fp, 'model')[0][1]).endswith('/' + model))
+        with self.assertRaises(loader.UnsupportedArchive): self.e.import_zip(sample)
+        renamed = self.base / 'renamed.zip'
+        with zipfile.ZipFile(sample) as src, zipfile.ZipFile(renamed, 'w') as dst:
+            for name in src.namelist():
+                dst.writestr('Anything.kicad_sym' if name.endswith('.kicad_sym') else name, src.read(name))
+        with self.assertRaises(loader.UnsupportedArchive): self.e.import_zip(renamed)
+        self.assertFalse(self.e.root.exists())
+
+    def test_changed_pin_visibility_gets_separate_symbol(self):
+        self.e.import_zip(self.sample)
+        changed = self.base / 'changed.zip'
+        with zipfile.ZipFile(self.sample) as src, zipfile.ZipFile(changed, 'w') as dst:
+            for name in src.namelist():
+                data = src.read(name)
+                if name.endswith('.kicad_sym'):
+                    tree = loader.parse(data.decode())
+                    pin = next(p for p in loader.descendants(tree, 'pin') if loader.val(loader.children(p, 'number')[0][1]) == '6')
+                    pin.remove('hide')
+                    data = loader.dump(tree).encode()
+                dst.writestr(name, data)
+        result = self.e.import_zip(changed)
+        self.assertTrue(result['symbols'][0].startswith('AP21510FM-7__'))
+        directory = self.e.root / 'SnapMagic' / 'SnapMagic.kicad_symdir'
+        for name, expected in [('AP21510FM-7', True), (result['symbols'][0], False)]:
+            tree = loader.parse((directory / (name + '.kicad_sym')).read_text(encoding='utf-8'))
+            pin = next(p for p in loader.descendants(tree, 'pin') if loader.val(loader.children(p, 'number')[0][1]) == '6')
+            hidden = 'hide' in pin or ['hide', 'yes'] in pin
+            self.assertEqual(hidden, expected)
 
 
 if __name__ == '__main__':

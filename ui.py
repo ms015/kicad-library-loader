@@ -20,7 +20,7 @@ def launch(settings):
     box = ttk.Frame(window, padding=18)
     box.pack(fill='both', expand=True)
     ttk.Label(box, text='KiCad Library Loader', font=('Yu Gothic UI', 20, 'bold')).pack(anchor='w')
-    ttk.Label(box, text='CSE / UltraLibrarian / SnapEDA ZIP → KiCad 10    •    LCSC番号入力').pack(anchor='w', pady=(0, 12))
+    ttk.Label(box, text='CSE / UltraLibrarian / SnapEDA個別ZIP → KiCad 10    •    LCSC番号入力').pack(anchor='w', pady=(0, 12))
     ttk.Label(box, text='監視先: ' + settings['watch_folder']).pack(anchor='w')
     ttk.Label(box, text='保存先: ' + settings['library_root']).pack(anchor='w')
     ttk.Label(box, text='起動中はサブフォルダも監視します。閉じると監視を終了します。').pack(anchor='w', pady=(3, 10))
@@ -33,7 +33,7 @@ def launch(settings):
     toolbar.pack(fill='x', pady=4)
 
     def choose_zip():
-        paths = filedialog.askopenfilenames(title='CSE / UltraLibrarian / SnapEDA ZIP', filetypes=[('ZIP', '*.zip')])
+        paths = filedialog.askopenfilenames(title='CSE / UltraLibrarian / SnapEDA個別ZIP', filetypes=[('ZIP', '*.zip')])
         for path in paths:
             jobs.put(('zip', path))
 
