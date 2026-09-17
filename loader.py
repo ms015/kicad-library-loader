@@ -17,7 +17,8 @@ import uuid
 import zipfile
 
 APP = Path(__file__).resolve().parent
-SERVICES = ('CSE', 'UltraLibrarian', 'LCSC')
+SERVICES = ('CSE', 'UltraLibrarian', 'SnapMagic', 'LCSC')
+WATCH_FORMAT_VERSION = 2
 
 
 def default_config():
@@ -135,6 +136,26 @@ class UnsupportedArchive(ValueError):
     pass
 
 
+def is_snapeda(archive, infos):
+    """Identify the source from embedded metadata, not generic KiCad filenames."""
+    for info in infos:
+        if info.file_size > 8 * 1024**2:
+            continue
+        if info.filename.lower().endswith('.kicad_sym'):
+            try:
+                tree = parse(archive.read(info).decode('utf-8-sig'))
+                for prop in descendants(tree, 'property'):
+                    if len(prop) >= 3 and val(prop[1]) in ('SnapEDA_Link', 'SNAPEDA_PACKAGE_ID', 'SNAPEDA_PN'):
+                        return True
+            except (ValueError, UnicodeError):
+                continue
+        elif Path(info.filename).name.lower() == 'how-to-import.htm':
+            text = archive.read(info).decode('utf-8-sig', errors='replace')
+            if re.search(r'https://(?:www\.)?(?:snapeda|snapmagic)\.com/', text, re.I):
+                return True
+    return False
+
+
 def unpack(path, destination):
     """Only extract CAD/text data. Never run scripts in downloaded archives."""
     with zipfile.ZipFile(path) as z:
@@ -148,8 +169,10 @@ def unpack(path, destination):
             service = 'CSE'
         elif ul:
             service = 'UltraLibrarian'
+        elif is_snapeda(z, infos):
+            service = 'SnapMagic'
         else:
-            raise UnsupportedArchive('CSE / UltraLibrarian のKiCad ZIPではありません')
+            raise UnsupportedArchive('CSE / UltraLibrarian / SnapEDA のKiCad ZIPではありません')
         seen = set()
         for info, name in zip(infos, names):
             p = PurePosixPath(name)
@@ -160,7 +183,8 @@ def unpack(path, destination):
             if p.suffix.lower() not in ('.kicad_sym', '.kicad_mod', '.lib', '.step', '.stp', '.wrl'):
                 continue
             if p.suffix.lower() == '.lib' and not any(part.lower().startswith('kicad') for part in p.parts):
-                continue
+                if service != 'SnapMagic' or not z.read(info).lstrip().startswith(b'EESchema-LIBRARY'):
+                    continue
             for part in p.parts:
                 safe_name(part)
             if name.casefold() in seen:
@@ -325,17 +349,36 @@ class Engine:
             intermediate.rmdir()
         if not seen_symbols:
             raise ValueError('変換後のシンボルが空です')
+        part_names = {}
+        if service == 'SnapMagic':
+            for p in symdir.glob('*.kicad_sym'):
+                for sym in children(parse(p.read_text(encoding='utf-8-sig')), 'symbol'):
+                    props = {val(x[1]): val(x[2]) for x in children(sym, 'property')}
+                    fp = props.get('Footprint', '').split(':')[-1]
+                    names = {val(sym[1])} | {props[k] for k in ('MP', 'MPN', 'SNAPEDA_PN') if props.get(k)}
+                    part_names.setdefault(fp, set()).update(names)
+        model_aliases = {}
         for p in raw.rglob('*'):
             if p.suffix.lower() in ('.step', '.stp', '.wrl'):
-                safe_name(p.name)
-                target = models / p.name
-                existing = [x for x in models.iterdir() if x.name.casefold() == p.name.casefold()]
+                filename = p.name
+                # The supplied SnapEDA collection appends "0" to model names.
+                # Normalize only when a symbol's exact MPN/name establishes the mapping.
+                matches = {name for names in part_names.values() for name in names
+                           if p.stem.casefold() in (name.casefold(), (name + '0').casefold())}
+                if len(matches) == 1:
+                    filename = next(iter(matches)) + p.suffix.lower()
+                safe_name(filename)
+                model_aliases[p.name.casefold()] = filename
+                target = models / filename
+                existing = [x for x in models.iterdir() if x.name.casefold() == filename.casefold()]
                 if existing and existing[0].read_bytes() != p.read_bytes():
                     raise ValueError('Conflicting 3D model: ' + p.name)
                 target.write_bytes(p.read_bytes())
         fp_names = set()
         missing = []
-        for p in sorted(raw.rglob('*.kicad_mod')):
+        warnings = []
+        footprints = sorted(raw.rglob('*.kicad_mod'))
+        for p in footprints:
             name = safe_name(p.stem)
             if name.casefold() in {n.casefold() for n in fp_names}:
                 raise ValueError('Ambiguous duplicate footprint: ' + name)
@@ -345,8 +388,22 @@ class Engine:
                 raise ValueError('Invalid footprint: ' + name)
             # UL variants share the internal name; preserve the unique filenames.
             tree[1] = quote(name)
+            # SnapEDA may ship STEP files without references or transforms.
+            # Use symbol MPN-to-footprint mapping, with a single-pair fallback.
+            if service == 'SnapMagic' and not children(tree, 'model'):
+                steps = [f for f in models.iterdir() if f.suffix.lower() in ('.step', '.stp')]
+                matched = [f for f in steps if f.stem.casefold() in {s.casefold() for s in part_names.get(name, set())}]
+                if not matched and len(footprints) == 1 and len(steps) == 1:
+                    matched = steps
+                if len(matched) == 1:
+                    tree.append(['model', quote(matched[0].name), ['offset', ['xyz', '0', '0', '0']],
+                                 ['scale', ['xyz', '1', '1', '1']], ['rotate', ['xyz', '0', '0', '0']]])
+                    warnings.append('3D参照がないため標準位置・倍率でリンク（位置合わせ未確認）: ' + name)
+                elif list(models.iterdir()):
+                    warnings.append('3Dモデルの対応が一意でないため自動リンクを省略: ' + name)
             for model in children(tree, 'model'):
                 basename = val(model[1]).replace('\\', '/').split('/')[-1]
+                basename = model_aliases.get(basename.casefold(), basename)
                 matches = [f for f in models.iterdir() if f.name.casefold() == basename.casefold()]
                 if not matches:
                     missing.append(name + ': ' + basename)
@@ -378,10 +435,10 @@ class Engine:
                     if key not in props and value:
                         sym.append(['property', quote(key), quote(value), ['at', '0', '0', '0'],
                                     ['effects', ['font', ['size', '1.27', '1.27']], ['hide', 'yes']]])
-                field('MPN', next((val(props[k][2]) for k in ('Manufacturer_Part_Number', 'Manufacturer Part', 'MPN') if k in props), val(sym[1])))
-                field('Manufacturer', next((val(props[k][2]) for k in ('Manufacturer_Name', 'Manufacturer') if k in props), ''))
+                field('MPN', next((val(props[k][2]) for k in ('Manufacturer_Part_Number', 'Manufacturer Part', 'MPN', 'MP', 'SNAPEDA_PN') if k in props), val(sym[1])))
+                field('Manufacturer', next((val(props[k][2]) for k in ('Manufacturer_Name', 'Manufacturer', 'MF', 'MANUFACTURER') if k in props), ''))
                 field('CAD Source', service)
-                field('CAD Source ID', source_id)
+                field('CAD Source ID', source_id or (val(props['SnapEDA_Link'][2]) if 'SnapEDA_Link' in props else ''))
                 if service == 'LCSC':
                     field('LCSC Part Number', source_id)
             p.write_text(dump(tree), encoding='utf-8')
@@ -391,7 +448,7 @@ class Engine:
         shutil.rmtree(out / 'preview', ignore_errors=True)
         return dict(status='imported', service=service, symbols=symbols,
                     footprints=sorted(fp_names), models=[p.name for p in models.iterdir()],
-                    warnings=(['同梱3Dモデルなし'] if not list(models.iterdir()) else []) +
+                    warnings=warnings + (['同梱3Dモデルなし'] if not list(models.iterdir()) else []) +
                              ['同梱されていない3D参照を除去: ' + m for m in missing],
                     kicad_version=run([self.cli, '--version']).strip())
 
@@ -452,7 +509,8 @@ class Watcher:
                 stat = path.stat()
                 key = str(path.resolve())
                 signature = [stat.st_size, stat.st_mtime_ns]
-                if self.done.get(key, {}).get('signature') == signature:
+                record = self.done.get(key, {})
+                if record.get('signature') == signature and record.get('format_version') == WATCH_FORMAT_VERSION:
                     continue
                 old = self.seen.get(key)
                 if not old or old[0] != signature:
@@ -471,7 +529,7 @@ class Watcher:
                 except Exception as exc:
                     status = 'error: ' + str(exc)
                     self.engine.log(path.name + ': ' + status)
-                self.done[key] = dict(signature=signature, status=status)
+                self.done[key] = dict(signature=signature, status=status, format_version=WATCH_FORMAT_VERSION)
                 json_write(self.ledger, self.done)
             except OSError as exc:
                 self.engine.log(str(exc))

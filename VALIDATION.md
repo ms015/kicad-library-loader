@@ -9,6 +9,8 @@
 | CSE `LIB_AP2151WG-7.zip` | AP2151WG-7、5ピン、1フットプリント、STP 1個 | C:/KiCadSync/Libraries/CSE |
 | UL `ul_AP2171WG-7.zip` | AP2171WG-7、5ピン、3フットプリント、3D同梱なし | C:/KiCadSync/Libraries/UltraLibrarian |
 | LCSC `C2864845` | TPS259474LRPWR、10ピン、1フットプリント、STEP/WRL各1個 | 作業用テストフォルダのみ |
+| SnapEDA `AP21510FM-7.zip` | AP21510FM-7、7ピン、1フットプリント、STEP 1個 | C:/KiCadSync/Libraries/SnapMagic |
+| SnapEDA `SnapEDA-Library.zip` | AP21510FM-7とTC74HC595AF_EL_F_、2フットプリント、STEP 2個 | 作業用テストフォルダ。既存AP21510FM-7との表示差分を確認し実配置は保留 |
 
 CSE SHA-256: `2aef67e30419d23ae489e7c402a0bb03f8135c61ae32e1bbb0a5a54b0a723113`
 
@@ -18,7 +20,7 @@ UL SHA-256: `e3db3b61d0a7dc7394a858f744e4295715d084c8c635d305f4b80afbb3bd5525`
 
 ## 自動テスト
 
-`python -m unittest discover -s tests -v`: 10件成功。
+`python -m unittest discover -s tests -v`: SnapEDA対応後は15件成功（skipなし）。
 
 - 引用・エスケープと未知のS式フィールドの保持
 - 危険なファイル名・ZIPの親ディレクトリ参照を拒否
@@ -29,6 +31,12 @@ UL SHA-256: `e3db3b61d0a7dc7394a858f744e4295715d084c8c635d305f4b80afbb3bd5525`
 - ダウンロード完了待ち、監視履歴による再起動後の重複スキップ
 - LCSC入力検証
 - 実ZIP変換、2番目のシンボル追記、同一ZIPスキップ、異なる同名フットプリントの拒否
+- SnapEDA個別／一括ZIPの変換、MP/SNAPEDA_PN・MF/MANUFACTURERの転記、STEP対応付け
+- SnapEDAパッド座標・寸法・マスク用ポリゴン数・STEPバイト列の保持
+- 対象外の一般KiCad ZIPをSnapEDAと誤認しないこと
+- 更新前に対象外だったZIPを監視処理が再評価すること
+
+両SnapEDA版のAP21510FM-7についてメーカー照合、同一試験配線によるネットリスト出力・ERC差分比較を実施。[比較結果](SNAPEDA-COMPARISON.md)参照。
 
 GUIのウィンドウ・ZIP/LCSC操作ボタンの生成、およびワーカースレッドの正常終了を確認。ZIP/番号入力からの処理本体はCLIで実データ検証済み。手動のGUIクリック操作やKiCad GUI上での外観確認は未実施です。
 

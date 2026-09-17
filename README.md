@@ -1,6 +1,6 @@
 # KiCad Library Loader
 
-Windows用の自作ライブラリローダー。CSE / UltraLibrarianのWebダウンロードZIPと、LCSC番号から取得した部品をKiCad 10の独立したライブラリに登録します。
+Windows用の自作ライブラリローダー。CSE / UltraLibrarian / SnapEDAのWebダウンロードZIPと、LCSC番号から取得した部品をKiCad 10の独立したライブラリに登録します。
 
 ## 起動
 
@@ -14,7 +14,7 @@ Windows用の自作ライブラリローダー。CSE / UltraLibrarianのWebダ�
 
 ## 保存形式
 
-既定の `C:/KiCadSync/Libraries` の下に、`CSE`、`UltraLibrarian`、`LCSC` を作成します。各サービスの下に次を配置します。
+既定の `C:/KiCadSync/Libraries` の下に、`CSE`、`UltraLibrarian`、`SnapMagic`（SnapEDA）、`LCSC` を作成します。各サービスの下に次を配置します。
 
 ```text
 CSE/
@@ -27,6 +27,10 @@ CSE/
 `Tables/sym-lib-table` と `Tables/fp-lib-table` にサービス別の登録を追加します。既存のSyncedテーブル構成と `${KICAD_SYNC_ROOT}` 環境変数が設定済みのPCを対象とします。別PCではこれらの設定が必要です。KiCadを起動中に新規ライブラリを登録した場合は再起動してください。
 
 シンボルのFootprint参照と3Dパスを配置先へ修正。元のメーカー・販売店フィールドを保持し、MPN/CAD Source等を補います。モデルが同梱されない場合は警告し、存在しない参照は除去します。3D形状の作成・推測はしません。
+
+SnapEDAはシンボル内の出典フィールド、または同梱インポートガイドのURLから判別します。個別ZIPと、1つのシンボルファイル＋Footprints.prettyに集約された一括ZIPの両方に対応します。MP/SNAPEDA_PNとMF/MANUFACTURERをMPN/Manufacturerへ転記し、元フィールド・SnapEDAリンク・パッケージIDも保持します。STEPに3D参照がない場合は、シンボルの型番・フットプリント対応から一意に特定できたモデルを原点・回転0°・倍率1でリンクし、位置合わせ未確認の警告を残します。一括ZIPのモデル名末尾の0は、型番と一致するときだけ正規化します。対応不明の場合は、フットプリント1個・STEP1個の組合せだけを補完対象とし、それ以外は自動リンクしません。
+
+両ZIPに同名部品があっても、シンボルの表示・属性が一致するとは限りません。同名で差分がある場合は従来どおり取り込み全体を停止し、既存ライブラリを保持します。ピンの非表示や電気的属性を無条件に同一視する処理は行いません。今回のAP21510FM-7比較は [SNAPEDA-COMPARISON.md](SNAPEDA-COMPARISON.md) を参照してください。
 
 ## 設定・CLI
 
@@ -59,12 +63,13 @@ CSE/
 - 変換・参照検証・KiCad SVG出力が成功してから配置。書き込み失敗は巻き戻します。途中終了の記録は次回インポート時に復元します。
 - `%LOCALAPPDATA%/KiCadLibraryLoader` に元ZIP、テーブル変更前バックアップ、監視履歴を保存します。
 - 自動監視で失敗したファイルはログに表示し、変更されるまで再試行しません。手動ZIP指定で再試行できます。
+- 対応形式を追加した版では監視履歴を再評価し、以前対象外だったZIPも取り込みます。アプリを起動中の場合は再起動してください。
 - 同一PCでの書き込みは排他制御します。Syncthing経由の複数PC同時書き込みは排他できないため、取り込みは1台で行ってください。
 - ZIP内の実行ファイル・マクロは実行しません。パストラバーサル、過大展開、曖昧な同名データを拒否します。
 
 ## 対応範囲
 
-CSEのKiCad同梱ZIP、およびULのKiCADv6等のKiCad書き出しZIPを対象とします。KiCad形式を含まないZIP、古い`.mod`だけのZIP、パスワード付きZIPには未対応。提供元CADのピン配置や電気的正確さは変換ソフトでは保証できないため、設計前にデータシートと照合してください。
+CSEのKiCad同梱ZIP、ULのKiCADv6等のKiCad書き出しZIP、SnapEDAのKiCad ZIPを対象とします。KiCad形式を含まないZIP、古い`.mod`だけのZIP、パスワード付きZIPには未対応。提供元CADのピン配置や電気的正確さは変換ソフトでは保証できないため、設計前にデータシートと照合してください。
 
 変換はインストール済みKiCad 10 CLIを使用。ZIP変換コードは本リポジトリ内にあり、Import-LIB等のプラグインには依存しません。
 

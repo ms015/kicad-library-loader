@@ -10,7 +10,7 @@ try {
     $shortcut.TargetPath = Join-Path $PSScriptRoot '.venv\Scripts\pythonw.exe'
     $shortcut.Arguments = '"' + (Join-Path $PSScriptRoot 'loader.py') + '" gui'
     $shortcut.WorkingDirectory = $PSScriptRoot
-    $shortcut.Description = 'CSE・UltraLibrarian・LCSCをKiCad 10ライブラリに登録'
+    $shortcut.Description = 'CSE・UltraLibrarian・SnapEDA・LCSCをKiCad 10ライブラリに登録'
     $shortcut.Save()
 } finally {
     Pop-Location
