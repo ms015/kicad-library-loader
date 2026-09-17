@@ -5,7 +5,7 @@ import threading
 import tkinter as tk
 from tkinter import ttk
 
-from preview import AlignmentSession
+from preview import AlignmentSession, ORIGIN_OPTIONS
 
 
 class AlignmentDialog:
@@ -26,6 +26,7 @@ class AlignmentDialog:
         self.current = 0
         self.results = queue.Queue()
         self.controls = []
+        self.loading = False
         box = ttk.Frame(self.window, padding=14)
         box.pack(fill='both', expand=True)
         ttk.Label(box, text='3D位置合わせ', font=('Yu Gothic UI', 18, 'bold')).pack(anchor='w')
@@ -44,11 +45,25 @@ class AlignmentDialog:
         right = ttk.Frame(body, padding=(14, 0, 0, 0))
         right.pack(side='left', fill='both', expand=True)
         ttk.Label(right, text='表示方向').pack(anchor='w')
-        self.view = ttk.Combobox(right, state='readonly', values=['斜め', '上', '正面', '右'], width=19)
-        self.view.current(0)
-        self.view.pack(anchor='w', pady=(3, 12))
-        self.view.bind('<<ComboboxSelected>>', lambda _: self.render())
-        self.controls.append((self.view, 'readonly'))
+        self.view = tk.StringVar(value='斜め')
+        view_style = ttk.Style(self.window)
+        view_style.configure('View.TButton', padding=(5, 3))
+        view_style.configure('ViewSelected.TButton', padding=(5, 3), relief='sunken')
+        view_box = ttk.Frame(right)
+        view_box.pack(anchor='w', pady=(3, 10))
+        self.view_buttons = {}
+        for column, name in enumerate(('斜め', '上', '正面', '右')):
+            button = ttk.Button(view_box, text=name, width=7,
+                                command=lambda selected=name: self.select_view(selected))
+            button.grid(row=0, column=column, padx=(0 if column == 0 else 3, 0))
+            self.view_buttons[name] = button
+            self.controls.append((button, 'normal'))
+        self.update_view_buttons()
+        ttk.Label(right, text='モデル原点').pack(anchor='w', pady=(2, 3))
+        self.origin = ttk.Combobox(right, state='readonly', values=ORIGIN_OPTIONS, width=19)
+        self.origin.pack(anchor='w', pady=(0, 10))
+        self.origin.bind('<<ComboboxSelected>>', self.select_origin)
+        self.controls.append((self.origin, 'readonly'))
         self.rotation = self.fields(right, '回転（度）', (0, 0, 0), quick=True)
         self.offset = self.fields(right, '移動（mm）', (0, 0, 0))
         self.scale = tk.StringVar()
@@ -83,7 +98,7 @@ class AlignmentDialog:
                                to=360 if quick else 1000, increment=90 if quick else .1, width=9)
             spin.pack(side='left')
             spin.bind('<Return>', lambda _: self.render())
-            variable.trace_add('write', self.changed)
+            variable.trace_add('write', lambda *_args, variable=variable: self.changed(variable))
             result.append(variable)
             self.controls.append((spin, 'normal'))
             if quick:
@@ -92,7 +107,11 @@ class AlignmentDialog:
                 self.controls.append((button, 'normal'))
         return result
 
-    def changed(self, *_):
+    def changed(self, variable=None):
+        if self.loading:
+            return
+        if variable in self.offset:
+            self.origin.set('手動')
         self.dirty = True
         if hasattr(self, 'confirm'):
             self.confirm.configure(state='disabled')
@@ -100,15 +119,39 @@ class AlignmentDialog:
 
     def load_values(self):
         values = self.session.get(self.current)
-        for key, variables in [('rotation', self.rotation), ('offset', self.offset)]:
-            for variable, value in zip(variables, values[key]):
-                variable.set(format(value, '.9g'))
-        self.scale.set('倍率: ' + ', '.join(format(v, '.6g') for v in values['scale']))
+        self.loading = True
+        try:
+            for key, variables in [('rotation', self.rotation), ('offset', self.offset)]:
+                for variable, value in zip(variables, values[key]):
+                    variable.set(format(value, '.9g'))
+            self.origin.set(self.session.origins[self.current])
+            self.scale.set('倍率: ' + ', '.join(format(v, '.6g') for v in values['scale']))
+        finally:
+            self.loading = False
         self.dirty = False
 
     def save_values(self):
-        self.session.update(self.current, [float(v.get()) for v in self.rotation], [float(v.get()) for v in self.offset])
+        self.session.update(self.current, [float(v.get()) for v in self.rotation],
+                            [float(v.get()) for v in self.offset], self.origin.get())
         self.dirty = False
+
+    def update_view_buttons(self):
+        for name, button in self.view_buttons.items():
+            button.configure(style='ViewSelected.TButton' if name == self.view.get() else 'View.TButton')
+
+    def select_view(self, name):
+        self.view.set(name)
+        self.update_view_buttons()
+        self.render()
+
+    def select_origin(self, _=None):
+        try:
+            self.save_values()
+            self.session.set_origin(self.current, self.origin.get())
+            self.load_values()
+            self.render()
+        except (TypeError, ValueError) as exc:
+            self.status.set('原点を変更できません: ' + str(exc))
 
     def select(self, _=None):
         try:

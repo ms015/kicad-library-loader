@@ -50,6 +50,26 @@ class SessionTests(unittest.TestCase):
         self.session.reset(0)
         self.assertEqual(self.session.get(0), original)
 
+    def test_origin_presets_update_offset_and_are_recorded(self):
+        self.fp.write_text(
+            '(footprint "Test" (layer "F.Cu") (at 0 0) '
+            '(fp_rect (start -4 -2) (end 6 8)) '
+            '(pad "1" thru_hole circle (at 1 2) (size 1 1) (drill 1) '
+            '(layers "*.Cu" "*.Mask")) '
+            '(pad "2" thru_hole circle (at -3 4) (size 1 1) (drill 1) '
+            '(layers "*.Cu" "*.Mask")) '
+            '(model "some/model.step" (offset (xyz 0 0 0)) '
+            '(scale (xyz 1 1 1)) (rotate (xyz 0 0 0))))',
+            encoding='utf-8')
+        self.session = AlignmentSession(self.output, 'SnapMagic', loader.default_config())
+        self.session.set_origin(0, '1番ピン位置')
+        self.assertEqual(self.session.get(0)['offset'], [1, 2, 0])
+        self.assertEqual(self.session.origins[0], '1番ピン位置')
+        self.session.set_origin(0, '外形中心')
+        self.assertEqual(self.session.get(0)['offset'], [1, 3, 0])
+        self.session.set_origin(0, '手動')
+        self.assertEqual(self.session.origins[0], '手動')
+
 
 class PreviewIntegrationTests(unittest.TestCase):
     def setUp(self):

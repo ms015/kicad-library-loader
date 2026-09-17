@@ -8,7 +8,10 @@ import math
 from pathlib import Path
 import tempfile
 
-from loader import children, dump, parse, quote, run, val
+from loader import children, descendants, dump, parse, quote, run, val
+
+
+ORIGIN_OPTIONS = ('フットプリント原点', '1番ピン位置', '外形中心', '手動')
 
 
 def vector(model, key, default):
@@ -45,6 +48,7 @@ class AlignmentSession:
             for index, model in enumerate(models):
                 self.entries.append((path.name, index, val(model[1]).replace('\\', '/').split('/')[-1]))
         self.reviewed = {}
+        self.origins = ['フットプリント原点'] * len(self.entries)
 
     def model(self, entry):
         name, index, _ = self.entries[entry]
@@ -56,7 +60,7 @@ class AlignmentSession:
                     offset=vector(model, 'offset', (0, 0, 0)),
                     scale=vector(model, 'scale', (1, 1, 1)))
 
-    def update(self, entry, rotation, offset):
+    def update(self, entry, rotation, offset, origin=None):
         model = copy.deepcopy(self.model(entry))
         set_vector(model, 'rotate', rotation)
         set_vector(model, 'offset', offset)
@@ -64,6 +68,59 @@ class AlignmentSession:
         tree = self.trees[name]
         old = children(tree, 'model')[index]
         tree[tree.index(old)] = model
+        if origin is not None:
+            self.origins[entry] = origin
+
+    @staticmethod
+    def _xy(node, key='at'):
+        nodes = children(node, key)
+        if not nodes or len(nodes[0]) < 3:
+            return None
+        try:
+            return float(nodes[0][1]), float(nodes[0][2])
+        except (TypeError, ValueError):
+            return None
+
+    def _footprint_anchor(self, entry, origin):
+        name = self.entries[entry][0]
+        tree = self.trees[name]
+        if origin == 'フットプリント原点':
+            return 0.0, 0.0
+        pads = children(tree, 'pad')
+        if origin == '1番ピン位置':
+            for pad in pads:
+                if len(pad) > 1 and val(pad[1]) == '1':
+                    point = self._xy(pad)
+                    if point is not None:
+                        return point
+            return 0.0, 0.0
+        points = []
+        for pad in pads:
+            point = self._xy(pad)
+            if point is not None:
+                points.append(point)
+        geometry = ('fp_line', 'fp_rect', 'fp_circle', 'fp_arc', 'fp_poly')
+        for shape in geometry:
+            for graphic in children(tree, shape):
+                for key in ('start', 'end', 'center', 'mid', 'xy'):
+                    for node in descendants(graphic, key):
+                        point = self._xy([node], key=key)
+                        if point is not None:
+                            points.append(point)
+        if not points:
+            return 0.0, 0.0
+        xs, ys = zip(*points)
+        return (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+
+    def set_origin(self, entry, origin):
+        if origin not in ORIGIN_OPTIONS:
+            raise ValueError('不明な原点指定です: ' + str(origin))
+        if origin == '手動':
+            self.origins[entry] = origin
+            return
+        current = self.get(entry)
+        x, y = self._footprint_anchor(entry, origin)
+        self.update(entry, current['rotation'], [x, y, current['offset'][2]], origin)
 
     def reset(self, entry):
         name, index, _ = self.entries[entry]
@@ -88,7 +145,7 @@ class AlignmentSession:
         for name, tree in self.trees.items():
             (self.directory / name).write_text(dump(tree), encoding='utf-8')
         for i, (name, _, modelname) in enumerate(self.entries):
-            result.append(dict(footprint=name, model=modelname, **self.get(i)))
+            result.append(dict(footprint=name, model=modelname, origin=self.origins[i], **self.get(i)))
         return result
 
     def render(self, entry, view='斜め'):
