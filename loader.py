@@ -231,8 +231,9 @@ def process_lock(state):
 
 
 class Engine:
-    def __init__(self, settings, log=print):
+    def __init__(self, settings, log=print, reviewer=None):
         self.c, self._display = settings, log
+        self.reviewer = reviewer
         self.root = Path(settings['library_root']).resolve()
         self.state = Path(settings['state_folder']).resolve()
         self.cli = Path(settings['kicad_cli'])
@@ -285,7 +286,7 @@ class Engine:
             self.recover()
             raise
 
-    def import_zip(self, filename):
+    def import_zip(self, filename, review_existing=False):
         filename = Path(filename)
         with process_lock(self.state):
             self.recover()
@@ -301,11 +302,18 @@ class Engine:
                 service = unpack(source, tmp / 'raw')
                 sha = digest(data)
                 manifest = self.root / service / 'imports' / (sha + '.json')
-                if manifest.exists():
+                previously_imported = manifest.exists()
+                if previously_imported and not (review_existing and self.reviewer):
                     self.log(f'{filename.name}: 取り込み済み')
                     return dict(status='duplicate', service=service)
                 result = self.convert(tmp / 'raw', tmp / 'out', service)
                 result.update(source=filename.name, sha256=sha)
+                if not self.review(tmp / 'out', service, result):
+                    self.log(filename.name + ': 取り込みをキャンセルしました')
+                    return dict(status='cancelled', service=service)
+                if previously_imported:
+                    review_hash = digest(json.dumps(result.get('alignment_review', []), sort_keys=True).encode())[:12]
+                    manifest = manifest.with_name(sha + '__review_' + review_hash + '.json')
                 atomic(self.state / 'archives' / (sha + '.zip'), data)
                 self.publish(tmp / 'out', service, result, manifest)
                 return result
@@ -331,8 +339,26 @@ class Engine:
                 self.log(output.strip())
                 result = self.convert(raw, tmp / 'out', 'LCSC', part)
                 result.update(source=part, converter='easyeda2kicad 1.0.1')
+                if not self.review(tmp / 'out', 'LCSC', result):
+                    self.log(part + ': 取り込みをキャンセルしました')
+                    return dict(status='cancelled', service='LCSC')
                 self.publish(tmp / 'out', 'LCSC', result, manifest)
                 return result
+
+    def review(self, out, service, result):
+        if self.reviewer is None:
+            return True
+        linked = any(children(parse(p.read_text(encoding='utf-8-sig')), 'model')
+                     for p in (out / (service + '.pretty')).glob('*.kicad_mod'))
+        if not linked:
+            return True
+        reviewed = self.reviewer(out, service)
+        if reviewed is None:
+            return False
+        result['alignment_review'] = reviewed
+        result['warnings'] = [w for w in result['warnings'] if '位置合わせ未確認' not in w]
+        run([self.cli, 'fp', 'upgrade', '--force', out / (service + '.pretty')])
+        return True
 
     def convert(self, raw, out, service, source_id=''):
         out.mkdir(parents=True)
@@ -564,6 +590,10 @@ class Engine:
         result['symbols'] = [maps['.kicad_symdir'].get(n, n) for n in result['symbols']]
         result['footprints'] = [maps['.pretty'].get(n, n) for n in result['footprints']]
         result['models'] = [model_names.get(n, n) for n in result['models']]
+        for review in result.get('alignment_review', []):
+            footprint = Path(review['footprint'])
+            review['footprint'] = maps['.pretty'].get(footprint.stem, footprint.stem) + footprint.suffix
+            review['model'] = model_names.get(review['model'], review['model'])
         result['warnings'].append('同名データとの差分を検出したため、関連ファイルを別名で登録: ' + suffix)
 
 

@@ -23,11 +23,20 @@ def launch(settings):
     ttk.Label(box, text='CSE / UltraLibrarian / SnapEDA個別ZIP → KiCad 10    •    LCSC番号入力').pack(anchor='w', pady=(0, 12))
     ttk.Label(box, text='監視先: ' + settings['watch_folder']).pack(anchor='w')
     ttk.Label(box, text='保存先: ' + settings['library_root']).pack(anchor='w')
-    ttk.Label(box, text='起動中はサブフォルダも監視します。閉じると監視を終了します。').pack(anchor='w', pady=(3, 10))
+    ttk.Label(box, text='起動中はサブフォルダも監視します。3Dモデル付きは位置合わせの確認後に登録します。').pack(anchor='w', pady=(3, 10))
     events, jobs = queue.Queue(), queue.Queue()
     stop, watching = threading.Event(), threading.Event()
     watching.set()
-    engine = Engine(settings, events.put)
+    active_dialog = [None]
+
+    def review(output, service):
+        request = dict(kind='alignment', output=output, service=service,
+                       ready=threading.Event(), result=None)
+        events.put(request)
+        request['ready'].wait()
+        return request['result']
+
+    engine = Engine(settings, events.put, reviewer=review)
     status = tk.StringVar(value='監視中')
     toolbar = ttk.Frame(box)
     toolbar.pack(fill='x', pady=4)
@@ -86,7 +95,7 @@ def launch(settings):
                     if job:
                         events.put('処理中: ' + job[1])
                         if job[0] == 'zip':
-                            engine.import_zip(job[1])
+                            engine.import_zip(job[1], review_existing=True)
                         else:
                             engine.import_lcsc(job[1])
                     elif watching.is_set():
@@ -107,6 +116,21 @@ def launch(settings):
                 text = events.get_nowait()
             except queue.Empty:
                 break
+            if isinstance(text, dict) and text.get('kind') == 'alignment':
+                def complete(result, request=text):
+                    active_dialog[0] = None
+                    request['result'] = result
+                    request['ready'].set()
+                if stop.is_set():
+                    complete(None)
+                else:
+                    try:
+                        from alignment_ui import AlignmentDialog
+                        active_dialog[0] = AlignmentDialog(window, text['output'], text['service'], settings, complete)
+                    except Exception as exc:
+                        events.put('位置合わせ画面を開けません: ' + str(exc))
+                        complete(None)
+                continue
             log.configure(state='normal')
             log.insert('end', text + '\n')
             log.see('end')
@@ -119,6 +143,8 @@ def launch(settings):
     def close():
         watching.clear()
         stop.set()
+        if active_dialog[0] is not None:
+            active_dialog[0].cancel()
         status.set('終了中 — 実行中の変換が完了するまでお待ちください')
         jobs.put(None)
 

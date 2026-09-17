@@ -191,6 +191,8 @@ class SnapEDAIntegrationTests(unittest.TestCase):
     def setUp(self):
         CoreTests.setUp(self)
         self.sample = Path.home() / 'Downloads' / 'AP21510FM-7.zip'
+        if not self.sample.exists():
+            self.sample = Path(loader.default_config()['state_folder']) / 'archives' / '2e89ef9a96f314ac1f154df125e4bbdc5edbd5da4e22ac7b501b8d00f33bacd6.zip'
         if not self.sample.exists() or not self.e.cli.exists():
             self.skipTest('Local SnapEDA sample and KiCad 10 required')
 
