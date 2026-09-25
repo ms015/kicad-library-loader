@@ -6,3 +6,24 @@ config.json
 dist/
 build/
 *.spec
+
+# Local credentials, downloaded CAD data, and runtime artifacts
+.env
+.env.*
+*.pem
+*.key
+*.zip
+*.7z
+*.whl
+*.tar.gz
+*.step
+*.stp
+*.wrl
+*.kicad_sym
+*.kicad_mod
+*.kicad_pcb
+archives/
+backups/
+imports/
+.easyeda_cache/
+*.log

@@ -1,5 +1,9 @@
 # KiCad Library Loader
 
+## **このソフトウェアはAIによって生成されています**
+
+本ソフトウェアのコード・ドキュメントはAIによって生成されたものです。動作や変換結果の正確性は保証しません。使用前に内容を確認し、取り込んだCADデータはメーカーのデータシートと照合してください。
+
 Windows用の自作ライブラリローダー。CSE / UltraLibrarian / SnapEDAのWebダウンロードZIPと、LCSC番号から取得した部品をKiCad 10の共通ライブラリ `Parts` に登録します。追加元は部品属性と取り込み履歴に保持します。
 
 ## 起動
@@ -93,3 +97,11 @@ CSEのKiCad同梱ZIP、ULのKiCADv6等のKiCad書き出しZIP、SnapEDAのKiCad�
 変換はインストール済みKiCad 10 CLIを使用。ZIP変換コードは本リポジトリ内にあり、Import-LIB等のプラグインには依存しません。
 
 参考: [KiCad CLI](https://docs.kicad.org/10.0/en/cli/cli.html)、[easyeda2kicad](https://github.com/uPesy/easyeda2kicad.py)
+
+## ライセンス・第三者データ
+
+本リポジトリの独自コード・ドキュメントには **BSD Zero Clause License（0BSD）** を適用します。[LICENSE](LICENSE) が正式な条件です。商用利用、改変、複製、再配布を許可し、著作権表示・ライセンス本文の保持やソースコード公開を条件としません。無保証で提供します。
+
+このライセンスは、外部ソフトウェアや取り込むCADデータの権利を変更しません。`easyeda2kicad 1.0.1` はAGPLv3の外部プログラムで、`Setup.ps1` が利用者の環境に別途インストールし、別プロセスで呼び出します。本リポジトリにその本体や配布パッケージは含めません。
+
+LCSC/EasyEDAおよび各CADデータ提供元の利用については、各サービスの利用規約と各データのライセンスに従ってください。変換・保存しても再配布の権利が新たに得られるわけではありません。第三者CADデータや取得済みZIPは本リポジトリに含めません。詳細は [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) を参照してください。
