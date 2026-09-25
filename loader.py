@@ -19,7 +19,7 @@ import zipfile
 APP = Path(__file__).resolve().parent
 SERVICES = ('CSE', 'UltraLibrarian', 'SnapMagic', 'LCSC')
 LIBRARY = 'Parts'
-WATCH_FORMAT_VERSION = 3
+WATCH_FORMAT_VERSION = 4
 
 
 def default_config():
@@ -27,7 +27,7 @@ def default_config():
                 library_root=r'C:\KiCadSync\Libraries',
                 state_folder=str(Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'KiCadLibraryLoader'),
                 kicad_cli=r'C:\Program Files (user)\KiCad\10.0\bin\kicad-cli.exe',
-                poll_seconds=3, stable_seconds=6)
+                poll_seconds=0.5, stable_seconds=1.5)
 
 
 def config(path=None):
@@ -627,19 +627,26 @@ class Watcher:
         self.seen = {}
         self.ledger = engine.state / 'watch-history.json'
         self.done = json.loads(self.ledger.read_text(encoding='utf-8')) if self.ledger.exists() else {}
+        self.folder = Path(engine.c['watch_folder'])
+        if not self.folder.is_dir():
+            raise ValueError('監視フォルダが存在しません: ' + str(self.folder))
+        # A run only watches arrivals. Manual ZIP selection can still import old files.
+        self.existing = {str(path.absolute()) for path in self.folder.rglob('*.zip')}
+        self.handled = set()
 
     def scan(self):
-        folder = Path(self.engine.c['watch_folder'])
-        if not folder.is_dir():
-            raise ValueError('監視フォルダが存在しません: ' + str(folder))
-        for path in folder.rglob('*.zip'):
+        if not self.folder.is_dir():
+            raise ValueError('監視フォルダが存在しません: ' + str(self.folder))
+        paths = {str(path.absolute()): path for path in self.folder.rglob('*.zip')}
+        self.existing.intersection_update(paths)
+        self.handled.intersection_update(paths)
+        self.seen = {key: value for key, value in self.seen.items() if key in paths}
+        for key, path in paths.items():
+            if key in self.existing or key in self.handled:
+                continue
             try:
                 stat = path.stat()
-                key = str(path.resolve())
                 signature = [stat.st_size, stat.st_mtime_ns]
-                record = self.done.get(key, {})
-                if record.get('signature') == signature and record.get('format_version') == WATCH_FORMAT_VERSION:
-                    continue
                 old = self.seen.get(key)
                 if not old or old[0] != signature:
                     self.seen[key] = (signature, time.monotonic())
@@ -659,6 +666,7 @@ class Watcher:
                     self.engine.log(path.name + ': ' + status)
                 self.done[key] = dict(signature=signature, status=status, format_version=WATCH_FORMAT_VERSION)
                 json_write(self.ledger, self.done)
+                self.handled.add(key)
             except OSError as exc:
                 self.engine.log(str(exc))
 

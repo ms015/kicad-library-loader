@@ -23,7 +23,7 @@ def launch(settings):
     ttk.Label(box, text='CSE / UltraLibrarian / SnapEDA個別ZIP → KiCad 10    •    LCSC番号入力').pack(anchor='w', pady=(0, 12))
     ttk.Label(box, text='監視先: ' + settings['watch_folder']).pack(anchor='w')
     ttk.Label(box, text='保存先: ' + settings['library_root']).pack(anchor='w')
-    ttk.Label(box, text='起動中はサブフォルダも監視します。3Dモデル付きは位置合わせの確認後に登録します。').pack(anchor='w', pady=(3, 10))
+    ttk.Label(box, text='起動後に追加されたZIPとサブフォルダを監視します。既存ZIPは手動選択できます。').pack(anchor='w', pady=(3, 10))
     events, jobs = queue.Queue(), queue.Queue()
     stop, watching = threading.Event(), threading.Event()
     watching.set()

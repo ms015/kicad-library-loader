@@ -6,8 +6,8 @@ Windows用の自作ライブラリローダー。CSE / UltraLibrarian / SnapEDA�
 
 初回はPowerShellで `./Setup.ps1`（uvが必要）。以後、デスクトップの **KiCad Library Loader** を開きます。`Start.ps1` でも起動できます。
 
-- 起動中は `~/Downloads` とサブフォルダを監視。既存ZIPも対象です。
-- 6秒間サイズ・更新時刻が変化しないZIPを内容から判別して取り込みます。ファイル名の接頭辞には依存しません。
+- 起動時に `~/Downloads` とサブフォルダの既存ZIPを記録し、その後に追加されたZIPだけを自動監視します。既存ZIPを取り込む場合は「ZIPを選んで取り込む」を使用してください。
+- 既定では0.5秒ごとに確認し、サイズ・更新時刻が1.5秒変化しない完全なZIPを内容から判別して取り込みます。ファイル名の接頭辞には依存しません。
 - 「ZIPを選んで取り込む」で手動指定・エラー後の再試行。登録済みZIPも位置合わせ画面を開き直せます。
 - LCSC番号欄に `C2040` のように入力して「取得して登録」。easyeda2kicad 1.0.1を使用します。
 - 閉じると監視を終了。位置合わせ中は取り込みをキャンセルし、レンダリング中なら終了を待って閉じます。Windows自動起動は設定しません。
@@ -60,8 +60,8 @@ SnapEDAは出典メタデータから判別し、**1部品の個別ZIPのみ**�
   "watch_folder": "C:/Users/<username>/Downloads",
   "library_root": "C:/KiCadSync/Libraries",
   "kicad_cli": "C:/Program Files (user)/KiCad/10.0/bin/kicad-cli.exe",
-  "stable_seconds": 6,
-  "poll_seconds": 3
+  "stable_seconds": 1.5,
+  "poll_seconds": 0.5
 }
 ```
 

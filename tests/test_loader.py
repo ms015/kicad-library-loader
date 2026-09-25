@@ -16,7 +16,7 @@ class CoreTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         self.c = loader.default_config()
         self.c.update(library_root=str(self.base / 'Libraries'), state_folder=str(self.base / 'state'),
-                      watch_folder=str(self.base / 'Downloads'), stable_seconds=6)
+                      watch_folder=str(self.base / 'Downloads'), stable_seconds=1.5)
         self.e = loader.Engine(self.c, lambda _: None)
 
     def test_parser_roundtrip_escapes_unknown_fields(self):
@@ -83,18 +83,22 @@ class CoreTests(unittest.TestCase):
             loader.atomic(p, data)
         self.assertEqual(self.e.table_updates('CSE'), [])
 
-    def test_watch_stability_and_restart_dedup(self):
+    def test_watch_only_files_added_after_start_and_wait_for_stability(self):
         downloads = Path(self.c['watch_folder']); downloads.mkdir()
+        old = downloads / 'old.zip'
+        with zipfile.ZipFile(old, 'w') as f:
+            f.writestr('test', 'data')
+        w = loader.Watcher(self.e)
         z = downloads / 'part.zip'
         with zipfile.ZipFile(z, 'w') as f:
             f.writestr('test', 'data')
-        w = loader.Watcher(self.e)
         with patch.object(self.e, 'import_zip', return_value=dict(status='imported')) as method:
             with patch('loader.time.monotonic', return_value=100): w.scan()
-            with patch('loader.time.monotonic', return_value=105): w.scan()
+            with patch('loader.time.monotonic', return_value=101): w.scan()
             method.assert_not_called()
-            with patch('loader.time.monotonic', return_value=107): w.scan()
+            with patch('loader.time.monotonic', return_value=102): w.scan()
             method.assert_called_once()
+            self.assertEqual(method.call_args.args[0], z)
             loader.Watcher(self.e).scan()
             method.assert_called_once()
 
@@ -110,18 +114,41 @@ class CoreTests(unittest.TestCase):
         with self.assertRaises(loader.UnsupportedArchive):
             loader.unpack(z, self.base / 'raw')
 
-    def test_watcher_revisits_previously_unsupported_after_upgrade(self):
+    def test_watcher_retries_new_arrival_with_old_history(self):
         downloads = Path(self.c['watch_folder']); downloads.mkdir()
         z = downloads / 'previously-ignored.zip'
-        with zipfile.ZipFile(z, 'w') as f: f.writestr('test', 'data')
-        stat = z.stat()
         loader.json_write(self.e.state / 'watch-history.json', {
-            str(z.resolve()): dict(signature=[stat.st_size, stat.st_mtime_ns], status='ignored')})
+            str(z.absolute()): dict(signature=[123, 1], status='ignored', format_version=3)})
         w = loader.Watcher(self.e)
+        with zipfile.ZipFile(z, 'w') as f: f.writestr('test', 'data')
         with patch.object(self.e, 'import_zip', return_value=dict(status='imported')) as method:
             with patch('loader.time.monotonic', return_value=100): w.scan()
-            with patch('loader.time.monotonic', return_value=107): w.scan()
+            with patch('loader.time.monotonic', return_value=102): w.scan()
             method.assert_called_once()
+
+    def test_watcher_accepts_zip_moved_into_subfolder_after_start(self):
+        downloads = Path(self.c['watch_folder']); downloads.mkdir()
+        nested = downloads / 'supplier'; nested.mkdir()
+        w = loader.Watcher(self.e)
+        with zipfile.ZipFile(nested / 'part.zip', 'w') as f: f.writestr('test', 'data')
+        with patch.object(self.e, 'import_zip', return_value=dict(status='imported')) as method:
+            with patch('loader.time.monotonic', return_value=100): w.scan()
+            with patch('loader.time.monotonic', return_value=102): w.scan()
+            method.assert_called_once_with(nested / 'part.zip')
+
+    def test_watcher_waits_for_download_to_finish(self):
+        downloads = Path(self.c['watch_folder']); downloads.mkdir()
+        w = loader.Watcher(self.e)
+        z = downloads / 'downloading.zip'
+        z.write_bytes(b'incomplete')
+        with patch.object(self.e, 'import_zip', return_value=dict(status='imported')) as method:
+            with patch('loader.time.monotonic', return_value=100): w.scan()
+            with patch('loader.time.monotonic', return_value=102): w.scan()
+            method.assert_not_called()
+            with zipfile.ZipFile(z, 'w') as f: f.writestr('test', 'complete')
+            with patch('loader.time.monotonic', return_value=103): w.scan()
+            with patch('loader.time.monotonic', return_value=105): w.scan()
+            method.assert_called_once_with(z)
 
 
 class SampleIntegrationTests(unittest.TestCase):
