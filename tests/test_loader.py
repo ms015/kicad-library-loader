@@ -158,7 +158,7 @@ class SampleIntegrationTests(unittest.TestCase):
                 dst.writestr(n, data)
         result = self.e.import_zip(other)
         self.assertEqual(result['symbols'], ['AP2151WG-7_TEST'])
-        self.assertEqual(len(list((self.e.root / 'CSE' / 'CSE.kicad_symdir').glob('*'))), 2)
+        self.assertEqual(len(list((self.e.root / 'Parts' / 'Parts.kicad_symdir').glob('*'))), 3)
         # A conflicting pad shape creates a separate, internally linked part set.
         conflict = self.base / 'conflict.zip'
         with zipfile.ZipFile(self.cse) as src, zipfile.ZipFile(conflict, 'w') as dst:
@@ -171,11 +171,11 @@ class SampleIntegrationTests(unittest.TestCase):
         result = self.e.import_zip(conflict)
         self.assertTrue(result['symbols'][0].startswith('AP2151WG-7__'))
         for path, data in before.items(): self.assertEqual(Path(path).read_bytes(), data)
-        symfile = self.e.root / 'CSE' / 'CSE.kicad_symdir' / (result['symbols'][0] + '.kicad_sym')
+        symfile = self.e.root / 'Parts' / 'Parts.kicad_symdir' / (result['symbols'][0] + '.kicad_sym')
         sym = loader.parse(symfile.read_text(encoding='utf-8'))
         fp = next(loader.val(p[2]) for p in loader.descendants(sym, 'property') if loader.val(p[1]) == 'Footprint')
-        self.assertEqual(fp, 'CSE:' + result['footprints'][0])
-        foot = loader.parse((self.e.root / 'CSE' / 'CSE.pretty' / (result['footprints'][0] + '.kicad_mod')).read_text(encoding='utf-8'))
+        self.assertEqual(fp, 'Parts:' + result['footprints'][0])
+        foot = loader.parse((self.e.root / 'Parts' / 'Parts.pretty' / (result['footprints'][0] + '.kicad_mod')).read_text(encoding='utf-8'))
         self.assertTrue(loader.val(loader.children(foot, 'model')[0][1]).endswith('/' + result['models'][0]))
         # Different ZIP packaging of identical variant data reuses the same names.
         repacked = self.base / 'repacked.zip'
@@ -200,24 +200,24 @@ class SnapEDAIntegrationTests(unittest.TestCase):
         result = self.e.import_zip(self.sample)
         self.assertEqual(result['service'], 'SnapMagic')
         self.assertEqual(result['symbols'], ['AP21510FM-7'])
-        root = self.e.root / 'SnapMagic'
-        sym = loader.parse((root / 'SnapMagic.kicad_symdir' / 'AP21510FM-7.kicad_sym').read_text(encoding='utf-8'))
+        root = self.e.root / 'Parts'
+        sym = loader.parse((root / 'Parts.kicad_symdir' / 'AP21510FM-7.kicad_sym').read_text(encoding='utf-8'))
         props = {loader.val(p[1]): loader.val(p[2]) for p in loader.descendants(sym, 'property')}
         self.assertEqual(props['MPN'], 'AP21510FM-7')
         self.assertEqual(props['Manufacturer'], 'Diodes Inc.')
         self.assertEqual(props['SNAPEDA_PACKAGE_ID'], '57660')
-        self.assertEqual(props['Footprint'], 'SnapMagic:SON50P181X201X60-7N')
-        fp = loader.parse((root / 'SnapMagic.pretty' / 'SON50P181X201X60-7N.kicad_mod').read_text(encoding='utf-8'))
+        self.assertEqual(props['Footprint'], 'Parts:SON50P181X201X60-7N')
+        fp = loader.parse((root / 'Parts.pretty' / 'SON50P181X201X60-7N.kicad_mod').read_text(encoding='utf-8'))
         with zipfile.ZipFile(self.sample) as z:
             original = loader.parse(z.read('SON50P181X201X60-7N.kicad_mod').decode())
-            self.assertEqual((root / 'SnapMagic.3dshapes' / 'AP21510FM-7.step').read_bytes(), z.read('AP21510FM-7.step'))
+            self.assertEqual((root / 'Parts.3dshapes' / 'AP21510FM-7.step').read_bytes(), z.read('AP21510FM-7.step'))
         def pads(tree):
             return {loader.val(p[1]): [[float(v) for v in loader.children(p, field)[0][1:]]
                     for field in ('at', 'size')] for p in loader.children(tree, 'pad')}
         self.assertEqual(pads(original), pads(fp))
         self.assertEqual(len(loader.children(fp, 'fp_poly')), len(loader.children(original, 'fp_poly')))
         model = loader.children(fp, 'model')[0]
-        self.assertEqual(loader.val(model[1]), '${KICAD_SYNC_ROOT}/Libraries/SnapMagic/SnapMagic.3dshapes/AP21510FM-7.step')
+        self.assertEqual(loader.val(model[1]), '${KICAD_SYNC_ROOT}/Libraries/Parts/Parts.3dshapes/AP21510FM-7.step')
         self.assertTrue(result['warnings'])
         self.assertEqual(self.e.import_zip(self.sample)['status'], 'duplicate')
 
@@ -228,7 +228,7 @@ class SnapEDAIntegrationTests(unittest.TestCase):
             dst.writestr('Extra.kicad_mod', src.read('SON50P181X201X60-7N.kicad_mod'))
         result = self.e.import_zip(modified)
         self.assertEqual(len(result['footprints']), 2)
-        for p in (self.e.root / 'SnapMagic' / 'SnapMagic.pretty').glob('*.kicad_mod'):
+        for p in (self.e.root / 'Parts' / 'Parts.pretty').glob('*.kicad_mod'):
             models = loader.children(loader.parse(p.read_text(encoding='utf-8')), 'model')
             self.assertEqual(len(models), 0 if p.stem == 'Extra' else 1)
         self.assertEqual(len(result['warnings']), 2)
@@ -258,7 +258,7 @@ class SnapEDAIntegrationTests(unittest.TestCase):
                 dst.writestr(name, data)
         result = self.e.import_zip(changed)
         self.assertTrue(result['symbols'][0].startswith('AP21510FM-7__'))
-        directory = self.e.root / 'SnapMagic' / 'SnapMagic.kicad_symdir'
+        directory = self.e.root / 'Parts' / 'Parts.kicad_symdir'
         for name, expected in [('AP21510FM-7', True), (result['symbols'][0], False)]:
             tree = loader.parse((directory / (name + '.kicad_sym')).read_text(encoding='utf-8'))
             pin = next(p for p in loader.descendants(tree, 'pin') if loader.val(loader.children(p, 'number')[0][1]) == '6')

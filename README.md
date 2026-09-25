@@ -1,6 +1,6 @@
 # KiCad Library Loader
 
-Windows用の自作ライブラリローダー。CSE / UltraLibrarian / SnapEDAのWebダウンロードZIPと、LCSC番号から取得した部品をKiCad 10の独立したライブラリに登録します。
+Windows用の自作ライブラリローダー。CSE / UltraLibrarian / SnapEDAのWebダウンロードZIPと、LCSC番号から取得した部品をKiCad 10の共通ライブラリ `Parts` に登録します。追加元は部品属性と取り込み履歴に保持します。
 
 ## 起動
 
@@ -29,19 +29,23 @@ CLIの `zip` / `lcsc` / `watch` は従来の無人取り込みです。位置合
 
 ## 保存形式
 
-既定の `C:/KiCadSync/Libraries` の下に、`CSE`、`UltraLibrarian`、`SnapMagic`（SnapEDA）、`LCSC` を作成します。各サービスの下に次を配置します。
+既定の `C:/KiCadSync/Libraries/Parts` に、すべての追加元の部品をまとめて配置します。
 
 ```text
-CSE/
-  CSE.kicad_symdir/   # KiCad 10で変換した部品ごとのシンボル
-  CSE.pretty/         # フットプリント（ULのL/M等の別形状も保持）
-  CSE.3dshapes/       # 同梱モデル。姿勢・倍率を保持
-  imports/           # 出典、SHA-256、変換時刻、警告
+Parts/
+  Parts.kicad_symdir/ # KiCad 10で変換した部品ごとのシンボル
+  Parts.pretty/      # フットプリント（ULのL/M等の別形状も保持）
+  Parts.3dshapes/    # 同梱モデル。姿勢・倍率を保持
+  imports/           # 追加元別の履歴。出典、SHA-256、変換時刻、警告
 ```
 
-`Tables/sym-lib-table` と `Tables/fp-lib-table` にサービス別の登録を追加します。既存のSyncedテーブル構成と `${KICAD_SYNC_ROOT}` 環境変数が設定済みのPCを対象とします。別PCではこれらの設定が必要です。KiCadを起動中に新規ライブラリを登録した場合は再起動してください。
+`Tables/sym-lib-table` と `Tables/fp-lib-table` に `Parts` を登録します。既存のSyncedテーブル構成と `${KICAD_SYNC_ROOT}` 環境変数が設定済みのPCを対象とします。別PCではこれらの設定が必要です。KiCadを起動中に新規ライブラリを登録した場合は再起動してください。
+
+旧サービス別ライブラリの初回統合は `python migrate_unified.py` で実行します。元フォルダを残し、全ファイルを試験領域で統合・参照確認してから書き込み、旧4登録をPartsに置き換えます。テーブルは通常のトランザクションバックアップに保存します。Partsがすでにある場合は停止します。既存プロジェクトで旧ライブラリ名を参照している場合は、事前に移行方法を確認してください。SamacSysとPersonalはこの移行の対象外です。
 
 シンボルのFootprint参照と3Dパスを配置先へ修正。元のメーカー・販売店フィールドを保持し、MPN/CAD Source等を補います。モデルが同梱されない場合は警告し、存在しない参照は除去します。3D形状の作成・推測はしません。
+
+追加元はシンボルのカスタム属性 `CAD Source` で確認できます（CSE / UltraLibrarian / SnapMagic＝SnapEDA / LCSC）。`CAD Source ID` には取得できた部品URLやLCSC番号、`MPN` には元のメーカー型番を保存します。これらは図面上では非表示の属性です。元ZIP名とSHA-256も `imports/<追加元>/` のJSONに記録します。
 
 SnapEDAは出典メタデータから判別し、**1部品の個別ZIPのみ**取り込みます。SnapEDA-Library.zip等の一括ZIPは対象外です。ZIP自体を改名しても中身から除外します。CSE・UltraLibrarianの対応範囲は変更しません。メーカー・型番・出典フィールドを保持します。STEP参照がない場合、一意に対応するモデルだけを原点・回転0°・倍率1でリンクし、位置合わせ未確認の警告を残します。
 

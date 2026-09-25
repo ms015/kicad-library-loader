@@ -18,6 +18,7 @@ import zipfile
 
 APP = Path(__file__).resolve().parent
 SERVICES = ('CSE', 'UltraLibrarian', 'SnapMagic', 'LCSC')
+LIBRARY = 'Parts'
 WATCH_FORMAT_VERSION = 3
 
 
@@ -301,7 +302,7 @@ class Engine:
                 source.write_bytes(data)
                 service = unpack(source, tmp / 'raw')
                 sha = digest(data)
-                manifest = self.root / service / 'imports' / (sha + '.json')
+                manifest = self.root / LIBRARY / 'imports' / service / (sha + '.json')
                 previously_imported = manifest.exists()
                 if previously_imported and not (review_existing and self.reviewer):
                     self.log(f'{filename.name}: 取り込み済み')
@@ -325,7 +326,7 @@ class Engine:
         with process_lock(self.state):
             self.recover()
             self.check()
-            manifest = self.root / 'LCSC' / 'imports' / (part + '.json')
+            manifest = self.root / LIBRARY / 'imports' / 'LCSC' / (part + '.json')
             if manifest.exists():
                 self.log(part + ': 取り込み済み')
                 return dict(status='duplicate', service='LCSC')
@@ -507,7 +508,30 @@ class Engine:
                 updates.append((path, (dump(tree) + '\n').encode('utf-8')))
         return updates
 
+    def unify(self, out, service):
+        """Retarget staged files after source-specific conversion and review."""
+        if service == LIBRARY:
+            return
+        for ext in ('.3dshapes', '.pretty', '.kicad_symdir'):
+            directory = out / (service + ext)
+            if ext != '.3dshapes':
+                for path in directory.iterdir():
+                    tree = parse(path.read_text(encoding='utf-8-sig'))
+                    if ext == '.pretty':
+                        for model in children(tree, 'model'):
+                            base = val(model[1]).replace('\\', '/').rsplit('/', 1)[-1]
+                            model[1] = quote('${KICAD_SYNC_ROOT}/Libraries/Parts/Parts.3dshapes/' + base)
+                    else:
+                        for prop in descendants(tree, 'property'):
+                            if val(prop[1]) == 'Footprint' and val(prop[2]).startswith(service + ':'):
+                                prop[2] = quote(LIBRARY + ':' + val(prop[2]).split(':', 1)[1])
+                    path.write_text(dump(tree), encoding='utf-8')
+            directory.rename(out / (LIBRARY + ext))
+
     def publish(self, out, service, result, manifest):
+        self.unify(out, service)
+        service = LIBRARY
+        result['library'] = LIBRARY
         self.rename_conflicts(out, service, result)
         updates = []
         # Models then footprints then symbols, registration last. Never overwrite conflicting parts.

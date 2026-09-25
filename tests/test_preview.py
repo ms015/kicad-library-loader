@@ -108,16 +108,16 @@ class PreviewIntegrationTests(unittest.TestCase):
         engine = loader.Engine(self.config, lambda _: None, reviewer=review)
         result = engine.import_zip(self.sample)
         self.assertEqual(result['alignment_review'][0]['rotation'], [270, 0, 90])
-        file = engine.root / 'SnapMagic/SnapMagic.pretty/SOP65P780X200-24N.kicad_mod'
+        file = engine.root / 'Parts/Parts.pretty/SOP65P780X200-24N.kicad_mod'
         model = loader.children(loader.parse(file.read_text(encoding='utf-8')), 'model')[0]
         angles = [float(v) % 360 for v in loader.children(loader.children(model, 'rotate')[0], 'xyz')[0][1:]]
         self.assertEqual(angles, [270, 0, 90])
         self.assertEqual(engine.import_zip(self.sample)['status'], 'duplicate')
         self.assertEqual(len(screenshots), 1)
-        old_manifest = next((engine.root / 'SnapMagic/imports').glob('*.json')).read_bytes()
+        old_manifest = next((engine.root / 'Parts/imports/SnapMagic').glob('*.json')).read_bytes()
         engine.import_zip(self.sample, review_existing=True)
         self.assertEqual(len(screenshots), 2)
-        self.assertIn(old_manifest, [p.read_bytes() for p in (engine.root / 'SnapMagic/imports').glob('*.json')])
+        self.assertIn(old_manifest, [p.read_bytes() for p in (engine.root / 'Parts/imports/SnapMagic').glob('*.json')])
         rotation[2] = 0
         changed = engine.import_zip(self.sample, review_existing=True)
         self.assertIn('__', changed['symbols'][0])
@@ -186,7 +186,7 @@ class PreviewIntegrationTests(unittest.TestCase):
                 return False
             walk(root)
 
-        expected = Path(self.config['library_root']) / 'SnapMagic/SnapMagic.pretty/SOP65P780X200-24N.kicad_mod'
+        expected = Path(self.config['library_root']) / 'Parts/Parts.pretty/SOP65P780X200-24N.kicad_mod'
         started = time.monotonic()
         def finish():
             if expected.exists() or time.monotonic() - started > 30:
