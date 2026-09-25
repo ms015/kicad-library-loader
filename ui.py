@@ -3,10 +3,37 @@ import os
 from pathlib import Path
 import queue
 import threading
+import webbrowser
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from loader import Engine, Watcher
+
+
+SERVICE_LINKS = (
+    ('CSE', 'https://componentsearchengine.com/'),
+    ('Ultra Librarian', 'https://www.ultralibrarian.com/'),
+    ('SnapEDA', 'https://www.snapeda.com/'),
+    ('LCSC', 'https://www.lcsc.com/'),
+)
+
+
+def open_service(parent, url):
+    try:
+        if not webbrowser.open_new_tab(url):
+            raise OSError('既定のブラウザを起動できませんでした')
+    except (OSError, webbrowser.Error) as exc:
+        messagebox.showerror('サイトを開けません', f'{url}\n\n{exc}', parent=parent)
+
+
+def add_service_links(parent):
+    row = ttk.Frame(parent)
+    row.pack(fill='x', pady=(0, 10))
+    ttk.Label(row, text='部品を探す:').pack(side='left', padx=(0, 6))
+    for name, url in SERVICE_LINKS:
+        ttk.Button(row, text=name, cursor='hand2',
+                   command=lambda url=url: open_service(parent, url)).pack(side='left', padx=(0, 6))
+    return row
 
 
 def launch(settings):
@@ -21,6 +48,7 @@ def launch(settings):
     box.pack(fill='both', expand=True)
     ttk.Label(box, text='KiCad Library Loader', font=('Yu Gothic UI', 20, 'bold')).pack(anchor='w')
     ttk.Label(box, text='CSE / UltraLibrarian / SnapEDA個別ZIP → KiCad 10    •    LCSC番号入力').pack(anchor='w', pady=(0, 12))
+    add_service_links(box)
     ttk.Label(box, text='監視先: ' + settings['watch_folder']).pack(anchor='w')
     ttk.Label(box, text='保存先: ' + settings['library_root']).pack(anchor='w')
     ttk.Label(box, text='起動後に追加されたZIPとサブフォルダを監視します。既存ZIPは手動選択できます。').pack(anchor='w', pady=(3, 10))
