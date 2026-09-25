@@ -174,7 +174,8 @@ class AlignmentSession:
             job.write_text(json.dumps(dict(library=str(library), footprint=Path(filename).stem,
                                            board=str(tmp / 'preview.kicad_pcb'))), encoding='utf-8')
             run([python, Path(__file__).with_name('render_board.py'), job], timeout=30)
-            views = {'斜め': ('top', '35,0,30'), '上': ('top', None),
+            # Tilt toward the front edge, so the board recedes into the screen.
+            views = {'斜め': ('top', '-35,0,30'), '上': ('top', None),
                      '正面': ('front', None), '右': ('right', None)}
             side, rotate = views[view]
             args = [cli, 'pcb', 'render', tmp / 'preview.kicad_pcb', '-o', tmp / 'preview.png',
